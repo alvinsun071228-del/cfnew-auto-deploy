@@ -16,7 +16,6 @@
 | 管理面板 | `https://alvinsun.cc.cd/0bac62fa-fc2c-457d-91a5-d9ee6ce4587a` |
 | 订阅地址 | `https://alvinsun.cc.cd/0bac62fa-fc2c-457d-91a5-d9ee6ce4587a/sub` |
 
-> ⚠️ 订阅地址里那段 UUID（`0bac62fa-...`）相当于密码，拿到它就能用你的节点。本仓库是公开的，**建议你尽快在面板里重新生成一个 UUID**，只自己保存。
 
 ### 各客户端导入方法
 
@@ -66,7 +65,6 @@
 | Panel | `https://alvinsun.cc.cd/0bac62fa-fc2c-457d-91a5-d9ee6ce4587a` |
 | Subscription | `https://alvinsun.cc.cd/0bac62fa-fc2c-457d-91a5-d9ee6ce4587a/sub` |
 
-> ⚠️ The UUID (`0bac62fa-...`) acts as your password — anyone with the URL can use your nodes. This repo is public, so **regenerate a new UUID in the panel** and keep it to yourself.
 
 ### Import into clients
 
