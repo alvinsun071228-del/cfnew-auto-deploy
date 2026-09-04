@@ -1,8 +1,7 @@
 # 本地密钥，切勿提交 / local secrets, never commit
 .env
 
-# 下载/生成的临时产物 / temporary artifacts
+# 下载/生成的临时产物（不提交到仓库）/ temporary artifacts (not committed)
 _worker.js
-VERSION.txt
 metadata.json
 Pages.zip
