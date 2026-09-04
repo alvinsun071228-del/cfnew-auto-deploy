@@ -1,0 +1,136 @@
+name: Sync & Deploy CFnew
+
+on:
+  workflow_dispatch:  # 手动触发 / manual trigger
+  schedule:
+    - cron: '0 */6 * * *'  # 每 6 小时检查一次 / check every 6 hours
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest cfnew release
+        id: get_latest
+        run: |
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/byJoey/cfnew/releases/latest)
+          VERSION=$(echo "$LATEST_RELEASE" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "latest version: $VERSION"
+
+          ASSETS_URL=$(echo "$LATEST_RELEASE" | sed -n 's/.*"assets_url": "\([^"]*\)".*/\1/p')
+          ASSETS=$(curl -s "$ASSETS_URL")
+          DOWNLOAD_URL=$(echo "$ASSETS" | grep -i "Pages\.zip" | grep -o '"browser_download_url": "[^"]*"' | sed 's/"browser_download_url": "\([^"]*\)"/\1/' | head -1)
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "error: Pages.zip not found in the latest release"
+            exit 1
+          fi
+          echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+          echo "download url: $DOWNLOAD_URL"
+
+      - name: Check current version
+        id: check_version
+        run: |
+          if [ ! -f "VERSION.txt" ]; then
+            CURRENT_VERSION=""
+          else
+            CURRENT_VERSION=$(cat VERSION.txt | tr -d '\n\r ')
+          fi
+          NEW_VERSION="${{ steps.get_latest.outputs.version }}"
+          echo "latest_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" != "$NEW_VERSION" ]; then
+            echo "need_update=true" >> $GITHUB_OUTPUT
+            echo "update needed: '${CURRENT_VERSION:-none}' -> $NEW_VERSION"
+          else
+            echo "need_update=false" >> $GITHUB_OUTPUT
+            echo "already up to date: $CURRENT_VERSION"
+          fi
+
+      - name: Download and extract
+        if: steps.check_version.outputs.need_update == 'true'
+        run: |
+          curl -sL -o Pages.zip "${{ steps.get_latest.outputs.download_url }}"
+          unzip -o Pages.zip -d .
+          rm -f Pages.zip
+          echo "${{ steps.get_latest.outputs.version }}" > VERSION.txt
+          test -f _worker.js && echo "_worker.js ready"
+
+      - name: Deploy to Cloudflare Workers
+        if: steps.check_version.outputs.need_update == 'true'
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KV_NAMESPACE: ${{ secrets.KV_NAMESPACE }}
+          UUID: ${{ secrets.UUID }}
+          WORKER_NAME: ${{ secrets.WORKER_NAME }}
+        run: |
+          set -e
+          if [ ! -f "_worker.js" ]; then
+            echo "::error::_worker.js not found"
+            exit 1
+          fi
+          WORKER="${WORKER_NAME:-cfnew-terminal}"
+
+          cat > metadata.json <<EOF
+          {
+            "main_module": "_worker.js",
+            "compatibility_date": "2026-01-20",
+            "compatibility_flags": [],
+            "bindings": [
+              {"type": "kv_namespace", "name": "C", "namespace_id": "${KV_NAMESPACE}"}
+            ]
+          }
+          EOF
+
+          echo ">> uploading worker script ($WORKER) ..."
+          UPLOAD=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/${WORKER}" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -F "metadata=@metadata.json;type=application/json" \
+            -F "_worker.js=@_worker.js;type=application/javascript+module")
+          echo "$UPLOAD"
+          echo "$UPLOAD" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true' || { echo "::error::script upload failed"; exit 1; }
+
+          echo ">> setting UUID secret (u) ..."
+          SECRET=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/${WORKER}/secrets" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"u\",\"text\":\"${UUID}\",\"type\":\"secret_text\"}")
+          echo "$SECRET"
+          echo "$SECRET" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true' || { echo "::error::secret setting failed"; exit 1; }
+
+          echo ">> deploy done"
+
+      - name: Commit and push version
+        if: steps.check_version.outputs.need_update == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "sync: update to cfnew ${{ steps.get_latest.outputs.version }}"
+            git push
+            echo "pushed"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## CFnew Sync Result" >> $GITHUB_STEP_SUMMARY
+          echo "- latest: ${{ steps.get_latest.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- current: ${{ steps.check_version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check_version.outputs.need_update }}" = "true" ]; then
+            echo "- status: ✅ updated & deployed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- status: ⏭️ already up to date" >> $GITHUB_STEP_SUMMARY
+          fi
