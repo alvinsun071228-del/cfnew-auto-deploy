@@ -2,8 +2,6 @@
 
 [中文](#中文) · [English](#english)
 
-> 本仓库是这套订阅的**使用说明 + 自动升级**。节点由 [byJoey/cfnew](https://github.com/byJoey/cfnew)（终端 v3.0）提供，部署在 Cloudflare Workers 上。
-
 ---
 
 <a id="chinese"></a>
